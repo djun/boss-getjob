@@ -118,12 +118,6 @@ private List<String> keywords = Arrays.asList(
 2. **状态检测**：定期检查系统状态，及时退出异常状态
 3. **强制恢复**：当检测到长时间无进展时，自动执行返回操作重置状态
 
-### 打招呼消息定制
-
-```java
-// 自定义打招呼消息
-private static final String GREETING_MESSAGE = "我叫xx";
-```
 
 ## 🔬 性能优化
 
