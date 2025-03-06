@@ -7,4 +7,32 @@
     <string name="open_accessibility_settings">打开无障碍设置</string>
     <string name="app_version">1.1.0.250305</string>
     <string name="version_info">当前版本：%s</string>
+    <string name="keywords_label">设置关键词用于匹配职位(多个关键词用逗号分隔)</string>
+    <string name="keywords_hint">例如: 运维,docker,kubernetes,devops</string>
+    <string name="save_keywords">保存关键词</string>
+    <string name="keywords_saved">关键词已保存</string>
+    <string name="default_keywords">运维,docker,k8s,系统运维,集群运维,kubernetes,devops</string>
+    <string name="job_category_label">选择职位类别:</string>
+    <string name="custom_keywords">自定义关键词</string>
+    
+    <!-- 预设职位类别的关键词 -->
+    <string-array name="job_categories">
+        <item>@string/custom_keywords</item>
+        <item>运维</item>
+        <item>Java开发</item>
+        <item>产品经理</item>
+        <item>前端开发</item>
+        <item>测试</item>
+        <item>运营</item>
+        <item>销售</item>
+    </string-array>
+    
+    <!-- 各职位类别对应的关键词 -->
+    <string name="keywords_ops">运维,docker,k8s,系统运维,集群运维,kubernetes,devops,PaaS,应用运维,交付,迁移,K8S,运维开发,云计算,实施,业务运维,SRE,sre,云平台,linux,DevOps,公有云,私有云,基础架构,容器</string>
+    <string name="keywords_java">高级后端,后端,Java,开发,开发工程师,项目开发,研发,服务端研发,java开发,Java开发,JAVA,后端开发,高级Java</string>
+    <string name="keywords_pm">产品,产品经理,产品专家,数字化专家,软件产品经理,B端产品经理,C端,高级产品经理,AI产品经理,app产品经理</string>
+    <string name="keywords_frontend">前端,前端开发,web前端,react,vue,web3,前端工程师,H5,H5开发,TypeScript,资深前端,高级前端,React,小程序,Vue</string>
+    <string name="keywords_test">测试,高级测试,系统测试,软件测试,测试工程师,后端测试,功能测试,app测试,自动化测试,业务测试</string>
+    <string name="keywords_sales">销售,销售专员,销售经理,业务销售,软件销售,销售顾问,电话销售,网络销售,销售代表,大客户销售,客户销售</string>
+    <string name="keywords_operation">运营专员,运营经理,运营,运营助理,渠道运营,技术运营,抖音运营,独立站运营,产品运营,内容运营,用户运营,活动运营,电商运营,跨境电商运营,新媒体运营,网站运营,社区运营,直播运营,游戏运营,数据运营,车辆运营,策略运营</string>
 </resources>
