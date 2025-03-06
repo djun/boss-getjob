@@ -1,6 +1,6 @@
 # BOSS直聘自动投递
 
-![版本](https://img.shields.io/badge/版本-1.1.0-blue)
+![版本](https://img.shields.io/badge/版本-1.1.0.250305-blue)
 ![平台](https://img.shields.io/badge/平台-Android-green)
 ![Java](https://img.shields.io/badge/语言-Java-orange)
 ![License](https://img.shields.io/badge/许可证-MIT-yellow)
