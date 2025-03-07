@@ -17,6 +17,7 @@ import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -39,15 +40,15 @@ public class MainActivity extends AppCompatActivity {
     private EditText etKeywords;
     private SharedPreferences sharedPreferences;
     private Spinner jobCategorySpinner;
+    private boolean isServiceRunning = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-
-        // 初始化SharedPreferences
+        
         sharedPreferences = getSharedPreferences(PREF_NAME, MODE_PRIVATE);
-
+        
         // 显示版本信息
         TextView versionInfoText = findViewById(R.id.versionInfoText);
         String versionInfo = String.format(
@@ -56,10 +57,23 @@ public class MainActivity extends AppCompatActivity {
         );
         versionInfoText.setText(versionInfo);
         
-        tvStatus = findViewById(R.id.tv_status);
-        tvLog = findViewById(R.id.tv_log);
+        // 初始化控件
         btnStart = findViewById(R.id.btn_start);
         btnStop = findViewById(R.id.btn_stop);
+        tvStatus = findViewById(R.id.tv_status);
+        
+        // 初始化按钮状态 - 默认开始按钮可点击，停止按钮不可点击
+        btnStart.setEnabled(true);
+        btnStop.setEnabled(false);
+        
+        // 检查无障碍服务状态并更新UI
+        if (isAccessibilityServiceEnabled()) {
+            tvStatus.setText("服务状态：已启用");
+        } else {
+            tvStatus.setText("服务状态：未启用");
+        }
+        
+        tvLog = findViewById(R.id.tv_log);
         btnAccessibilitySettings = findViewById(R.id.btn_accessibility_settings);
         etKeywords = findViewById(R.id.et_keywords);
         jobCategorySpinner = findViewById(R.id.spinner_job_category);
@@ -117,10 +131,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        updateServiceStatus();
-    }
-
-    private void updateServiceStatus() {
+        
         if (isAccessibilityServiceEnabled()) {
             tvStatus.setText("服务状态：已启用");
         } else {
@@ -153,9 +164,42 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    // 添加广播接收器定义
+    private final BroadcastReceiver logReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if ("com.example.bossresume.LOG_UPDATE".equals(intent.getAction())) {
+                String logMessage = intent.getStringExtra("log_message");
+                if (logMessage != null) {
+                    updateLogDisplay(logMessage);
+                }
+            }
+        }
+    };
+
     private void registerBroadcastReceiver() {
-        IntentFilter filter = new IntentFilter(ACTION_SERVICE_STATUS_CHANGED);
-        registerReceiver(serviceStatusReceiver, filter);
+        IntentFilter filter = new IntentFilter();
+        filter.addAction("com.example.bossresume.LOG_UPDATE");
+        
+        // 修改注册方式，添加 RECEIVER_NOT_EXPORTED 标志
+        registerReceiver(
+            logReceiver,
+            filter,
+            Context.RECEIVER_NOT_EXPORTED
+        );
+    }
+
+    // 添加更新日志显示的方法
+    private void updateLogDisplay(String message) {
+        TextView logTextView = findViewById(R.id.tv_log);
+        if (logTextView != null) {
+            logTextView.append(message + "\n");
+            // 让TextView滚动到底部
+            int scrollAmount = logTextView.getLayout().getLineTop(logTextView.getLineCount()) - logTextView.getHeight();
+            if (scrollAmount > 0) {
+                logTextView.scrollTo(0, scrollAmount);
+            }
+        }
     }
 
     private BroadcastReceiver serviceStatusReceiver = new BroadcastReceiver() {
@@ -171,8 +215,7 @@ public class MainActivity extends AppCompatActivity {
     };
 
     private void updateUI(boolean isRunning, int count) {
-        btnStart.setEnabled(!isRunning);
-        btnStop.setEnabled(isRunning);
+        updateServiceStatus(isRunning);
         
         tvStatus.setText("服务状态：" + (isRunning ? "运行中" : "未运行"));
         tvLog.append("已投递: " + count + "\n");
@@ -185,24 +228,34 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void startService() {
-        Intent intent = new Intent(this, BossResumeService.class);
-        intent.setAction(BossResumeService.ACTION_START);
-        // 添加关键词到Intent
-        intent.putExtra(KEY_KEYWORDS, etKeywords.getText().toString().trim());
-        startService(intent);
-        updateUI(true, 0);
-        
-        // 启动BOSS直聘APP
-        Handler handler = new Handler();
-        handler.postDelayed(() -> {
-            BossResumeService.launchBossApp(this);
-        }, 500);
+        if (!isServiceRunning) {  // 只有在服务未运行时才启动
+            Intent intent = new Intent(this, BossResumeService.class);
+            intent.setAction(BossResumeService.ACTION_START);
+            // 添加关键词到Intent
+            intent.putExtra(KEY_KEYWORDS, etKeywords.getText().toString().trim());
+            startService(intent);
+            updateServiceStatus(true);  // 只在用户点击开始时更新状态
+            Toast.makeText(this, "服务已启动", Toast.LENGTH_SHORT).show();
+            
+            // 启动BOSS直聘APP
+            Handler handler = new Handler();
+            handler.postDelayed(() -> {
+                BossResumeService.launchBossApp(this);
+            }, 500);
+        }
     }
 
     private void stopService() {
-        Intent intent = new Intent(this, BossResumeService.class);
-        intent.setAction(BossResumeService.ACTION_STOP);
-        startService(intent);
+        if (isServiceRunning) {
+            // 停止服务
+            Intent intent = new Intent(this, BossResumeService.class);
+            stopService(intent);
+            
+            // 更新UI状态
+            updateServiceStatus(false);
+            
+            Toast.makeText(this, "服务已停止", Toast.LENGTH_SHORT).show();
+        }
     }
 
     // 提供静态方法供BossResumeService获取关键词
@@ -276,5 +329,20 @@ public class MainActivity extends AppCompatActivity {
                 // 不做任何操作
             }
         });
+    }
+
+    private void updateServiceStatus(boolean isRunning) {
+        Button startButton = findViewById(R.id.btn_start);
+        Button stopButton = findViewById(R.id.btn_stop);
+        
+        if (isRunning) {
+            startButton.setEnabled(false);
+            stopButton.setEnabled(true);
+            isServiceRunning = true;
+        } else {
+            startButton.setEnabled(true);
+            stopButton.setEnabled(false);
+            isServiceRunning = false;
+        }
     }
 } 
