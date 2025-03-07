@@ -1,10 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="purple_200">#FFBB86FC</color>
-    <color name="purple_500">#FF6200EE</color>
-    <color name="purple_700">#FF3700B3</color>
-    <color name="teal_200">#FF03DAC5</color>
-    <color name="teal_700">#FF018786</color>
+    <!-- 黑白主题色系 -->
+    <color name="neutral_50">#FAFAFA</color>    <!-- 最浅灰 -->
+    <color name="neutral_100">#F5F5F5</color>   <!-- 浅灰 -->
+    <color name="neutral_200">#EEEEEE</color>   <!-- 灰白 -->
+    <color name="neutral_800">#424242</color>   <!-- 深灰 -->
+    <color name="neutral_900">#212121</color>   <!-- 最深灰 -->
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+    
+    <!-- 背景和文字颜色 -->
+    <color name="background_light">#FFFFFF</color>
+    <color name="surface_variant">#F5F5F5</color>
+    <color name="text_primary">#212121</color>
+    <color name="text_secondary">#757575</color>
 </resources>
