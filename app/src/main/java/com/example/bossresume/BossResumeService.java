@@ -44,7 +44,7 @@ public class BossResumeService extends AccessibilityService {
     
     // 关键词列表 - 动态获取
     private List<String> keywords = new ArrayList<>();
-
+    
     // 已点击的节点记录，避免重复点击
     private List<String> clickedNodes = new ArrayList<>();
     
@@ -94,7 +94,7 @@ public class BossResumeService extends AccessibilityService {
     private static final int MAX_BACKS_CHAT_PAGE = 2;     // 聊天页面最大返回次数
 
     // 添加打招呼相关常量和变量
-    private static final String GREETING_MESSAGE = "我叫桂晨"; // 打招呼用语
+    private static final String GREETING_MESSAGE = "您好"; // 打招呼用语
     private boolean greetingSent = false; // 标记是否已发送打招呼消息
     private boolean greetingDetected = false; // 标记是否检测到已发送的打招呼消息
 
@@ -137,73 +137,65 @@ public class BossResumeService extends AccessibilityService {
     private static final long MIN_TAB_CLICK_INTERVAL = 2000; // 最小点击间隔2秒
     private boolean isTabClickPending = false; // 标记是否有待执行的标签点击
 
-    // 获取当前界面类型
+    // 获取当前界面类型 - 修复中文引号导致的编译错误
     private PageType getCurrentPageType(AccessibilityNodeInfo rootNode) {
         if (rootNode == null) return null;
         
-        StringBuilder features = new StringBuilder();
-        int featureCount = 0;
-        boolean positionTabSelected = false;
-        
-        // 检查是否在职位详情页
-        List<AccessibilityNodeInfo> chatButtons = rootNode.findAccessibilityNodeInfosByText("立即沟通");
-        if (chatButtons.isEmpty()) {
-            chatButtons = rootNode.findAccessibilityNodeInfosByText("继续沟通");
-        }
-        if (!chatButtons.isEmpty()) {
-            logMessage("检测到立即沟通按钮，判断为职位详情页");
-            return PageType.JOB_DETAIL;
+        // 首先检查是否在职位列表页面 - 这是最优先的检查
+        // 查找职位标签是否被选中
+        List<AccessibilityNodeInfo> tabNodes = rootNode.findAccessibilityNodeInfosByViewId("com.hpbr.bosszhipin:id/tv_tab_1");
+        for (AccessibilityNodeInfo node : tabNodes) {
+            if (node != null && node.isSelected() && node.getText() != null && 
+                "职位".equals(node.getText().toString())) {
+                logMessage("检测到职位标签被选中，判定为职位主界面");
+                return PageType.MAIN_LIST;
+            }
         }
         
-        // 检查是否在聊天页面
-        List<AccessibilityNodeInfo> inputBoxes = rootNode.findAccessibilityNodeInfosByViewId("com.hpbr.bosszhipin:id/et_chat");
-        if (!inputBoxes.isEmpty()) {
-            logMessage("检测到聊天输入框，判断为聊天页面");
+        // 检查是否存在"再按一次退出程序"提示，这也表明在主界面
+        List<AccessibilityNodeInfo> exitPromptNodes = rootNode.findAccessibilityNodeInfosByText("再按一次退出程序");
+        if (!exitPromptNodes.isEmpty()) {
+            logMessage("检测到\"再按一次退出程序\"提示，判定为职位主界面");
+            return PageType.MAIN_LIST;
+        }
+        
+        // 其次检查是否在职位详情页面
+        List<AccessibilityNodeInfo> chatButtons = rootNode.findAccessibilityNodeInfosByViewId("com.hpbr.bosszhipin:id/btn_chat");
+        for (AccessibilityNodeInfo button : chatButtons) {
+            if (button != null && button.getText() != null) {
+                String buttonText = button.getText().toString();
+                if ("立即沟通".equals(buttonText) || "继续沟通".equals(buttonText)) {
+                    logMessage("检测到\"" + buttonText + "\"按钮，判定为职位详情页");
+                    return PageType.JOB_DETAIL;
+                }
+            }
+        }
+        
+        // 最后检查是否在聊天页面
+        List<AccessibilityNodeInfo> chatFeatures = rootNode.findAccessibilityNodeInfosByViewId("com.hpbr.bosszhipin:id/mTextView");
+        for (AccessibilityNodeInfo feature : chatFeatures) {
+            if (feature != null && feature.getText() != null) {
+                String featureText = feature.getText().toString();
+                if ("发简历".equals(featureText) || 
+                    "换电话".equals(featureText) || 
+                    "换微信".equals(featureText) || 
+                    "不感兴趣".equals(featureText)) {
+                    logMessage("检测到\"" + featureText + "\"，判定为聊天页面");
             return PageType.CHAT_PAGE;
         }
-        
-        // 检查底部导航栏的"职位"标签
-        List<AccessibilityNodeInfo> tabNodes = rootNode.findAccessibilityNodeInfosByViewId("com.hpbr.bosszhipin:id/tv_tab_text");
-        for (AccessibilityNodeInfo node : tabNodes) {
-            if (node.getText() != null && node.getText().toString().equals("职位") && node.isSelected()) {
-                features.append("底部职位标签(已选中) ");
-                featureCount++;
-                positionTabSelected = true;
-                break;
-            } else if (node.getText() != null && node.getText().toString().equals("职位")) {
-                features.append("底部职位标签 ");
-                featureCount++;
-                break;
             }
         }
         
-        // 如果职位标签被选中，这是一个强有力的主界面特征
-        if (positionTabSelected) {
-            logMessage("检测到底部职位标签被选中，判断为职位主界面");
+        // 如果前一个页面是职位列表页面，且当前处于FrameLayout（可能是退出提示），仍判断为职位列表
+        if (previousPageType == PageType.MAIN_LIST && 
+            rootNode.getClassName() != null && 
+            "android.widget.FrameLayout".equals(rootNode.getClassName().toString())) {
+            logMessage("检测到从职位列表进入FrameLayout，可能是退出提示，仍判定为职位列表");
             return PageType.MAIN_LIST;
         }
         
-        // 额外检查是否有职位列表
-        List<AccessibilityNodeInfo> jobListNodes = findJobCards(rootNode);
-        if (!jobListNodes.isEmpty()) {
-            features.append("职位列表 ");
-            featureCount++;
-            return PageType.MAIN_LIST;
-        }
-        
-        // 如果以上都没匹配到，但能获取到rootNode，说明在某个页面上
-        // 尝试获取当前Activity的类名
-        CharSequence className = rootNode.getClassName();
-        if (className != null) {
-            String classNameStr = className.toString();
-            if (classNameStr.contains("JobDetailActivity")) {
-                return PageType.JOB_DETAIL;
-            } else if (classNameStr.contains("ChatRoomActivity")) {
-                return PageType.CHAT_PAGE;
-            }
-        }
-        
-        logMessage("未能识别当前界面类型，className: " + (className != null ? className : "null"));
+        logMessage("未能识别当前界面类型，className: " + 
+                  (rootNode.getClassName() != null ? rootNode.getClassName() : "null"));
         return null;
     }
 
@@ -215,7 +207,7 @@ public class BossResumeService extends AccessibilityService {
         if (isServiceStopping || !isRunning) {
             return;
         }
-
+        
         // 记录窗口状态变化，更好地检测弹窗
         if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             String packageName = event.getPackageName() != null ? event.getPackageName().toString() : "未知包名";
@@ -254,22 +246,22 @@ public class BossResumeService extends AccessibilityService {
                 handleDailyLimitReached();
                 
                 // 延迟后停止服务
-                handler.postDelayed(() -> {
+        handler.postDelayed(() -> {
                     if (dailyLimitReached) {
                         logMessage("已达到每日聊天限制，准备停止服务");
                         stopService();
                     }
                 }, 5000);  // 增加延迟，确保有足够时间返回到职位界面
-                return;
-            }
-            
+                    return;
+                }
+                
             // 如果已经达到限制但仍在运行，强制返回并尝试停止
             if (dailyLimitReached) {
                 logMessage("已达到每日限制，但服务仍在运行，强制返回并停止");
                 performBackOperation();
                 handler.postDelayed(this::stopService, 2000);
                 rootNode.recycle();
-                return;
+                    return;
             }
         }
 
@@ -279,8 +271,8 @@ public class BossResumeService extends AccessibilityService {
             event.getEventType() == AccessibilityEvent.TYPE_VIEW_SCROLLED) {
             lastUserInteractionTime = System.currentTimeMillis();
         }
-
-        // 获取当前页面类型
+            
+            // 获取当前页面类型
         if (rootNode != null) {
             PageType currentPage = getCurrentPageType(rootNode);
             if (currentPage != null) {
@@ -316,6 +308,32 @@ public class BossResumeService extends AccessibilityService {
                 }
             }
         }
+
+        // 在处理页面切换事件时，更新状态切换时间
+        if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || 
+            event.getEventType() == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
+            
+            AccessibilityNodeInfo updatedRootNode = getRootInActiveWindow();  // 修改变量名，避免冲突
+            if (updatedRootNode != null) {
+                PageType newPageType = getCurrentPageType(updatedRootNode);
+                
+                // 如果检测到页面类型变化，更新状态切换时间
+                if (newPageType != currentPageType) {
+                    logMessage("页面类型从 " + currentPageType + " 变为 " + newPageType);
+                    previousPageType = currentPageType;
+                    currentPageType = newPageType;
+                    lastStateChangeTime = System.currentTimeMillis();  // 更新状态变化时间
+                    
+                    // 如果从列表页面进入详情页面，特别标记
+                    if (previousPageType == PageType.MAIN_LIST && newPageType == PageType.JOB_DETAIL) {
+                        currentState = State.VIEWING_DETAIL;
+                        logMessage("从列表页面进入详情页面，状态更新为查看详情");
+                    }
+                }
+                
+                updatedRootNode.recycle();  // 修改变量名，避免冲突
+            }
+        }
     }
 
     // 专门用于检测聊天页面中的限制文本
@@ -334,8 +352,8 @@ public class BossResumeService extends AccessibilityService {
                 // 标记已达到限制并处理
                 dailyLimitReached = true;
                 handler.postDelayed(this::handleDailyLimitReached, 500);
-                return;
-            }
+                    return;
+                }
         }
         
         // 递归检查所有子节点
@@ -657,11 +675,11 @@ public class BossResumeService extends AccessibilityService {
                             }
                             
                             // 初始化或重置一些状态变量
-                            totalCount = 0;
-                            greetingCount = 0;
-                            clickedNodes.clear();
-                            currentState = State.BROWSING_LIST;
-                            
+            totalCount = 0;
+            greetingCount = 0;
+            clickedNodes.clear();
+            currentState = State.BROWSING_LIST;
+            
                             // 开始监控任务
                             startServiceWatchdog();
                             startAppStatusCheck();
@@ -738,7 +756,7 @@ public class BossResumeService extends AccessibilityService {
             logMessage("服务正在停止中，跳过重复停止");
             return;
         }
-
+        
         // 立即设置停止标志
         isServiceStopping = true;
         isRunning = false;
@@ -828,7 +846,7 @@ public class BossResumeService extends AccessibilityService {
                 }
             } else {
                 logMessage("服务被中断，且已达到最大打招呼次数或服务正在停止中，不再恢复");
-                isRunning = false;
+        isRunning = false;
             }
         }, 5000);
     }
@@ -1343,9 +1361,9 @@ public class BossResumeService extends AccessibilityService {
         long currentTime = System.currentTimeMillis();
         if (currentTime - lastPositionTabClickTime < MIN_TAB_CLICK_INTERVAL) {
             logMessage("职位标签点击过于频繁，延迟执行");
-            return;
-        }
-        
+                return;
+            }
+            
         lastPositionTabClickTime = currentTime;
         
         // 尝试查找职位标签
@@ -1528,97 +1546,97 @@ public class BossResumeService extends AccessibilityService {
     
     // 完整替换整个方法
     private void executeReturnOperation(int times) {
-            // 检查距离上次返回操作的时间间隔
-            long currentTime = System.currentTimeMillis();
-            if (currentTime - lastBackOperationTime < MIN_BACK_INTERVAL) {
-                logMessage("距离上次返回操作时间不足" + (MIN_BACK_INTERVAL/1000) + "秒，延迟执行");
-                handler.postDelayed(() -> executeReturnOperation(times), MIN_BACK_INTERVAL - (currentTime - lastBackOperationTime) + 1000);
+        // 检查距离上次返回操作的时间间隔
+        long currentTime = System.currentTimeMillis();
+        if (currentTime - lastBackOperationTime < MIN_BACK_INTERVAL) {
+            logMessage("距离上次返回操作时间不足" + (MIN_BACK_INTERVAL/1000) + "秒，延迟执行");
+            handler.postDelayed(() -> executeReturnOperation(times), MIN_BACK_INTERVAL - (currentTime - lastBackOperationTime) + 1000);
+            return;
+        }
+        
+        // 先检查当前是否有"再按一次退出程序"提示
+        AccessibilityNodeInfo currentRootNode = getRootInActiveWindow();
+        if (currentRootNode != null) {
+            List<AccessibilityNodeInfo> exitPromptNodes = currentRootNode.findAccessibilityNodeInfosByText("再按一次退出");
+            if (!exitPromptNodes.isEmpty()) {
+                logMessage("检测到退出提示，已在职位主界面，禁止执行返回操作，直接开始查找职位");
+                handler.postDelayed(() -> findAndClickJobs(getRootInActiveWindow()), MAIN_PAGE_LOAD_DELAY);
                 return;
             }
             
-            // 先检查当前是否有"再按一次退出程序"提示
-            AccessibilityNodeInfo currentRootNode = getRootInActiveWindow();
-            if (currentRootNode != null) {
-                List<AccessibilityNodeInfo> exitPromptNodes = currentRootNode.findAccessibilityNodeInfosByText("再按一次退出");
+            // 检查当前包名，判断是否已退出BOSS直聘
+            if (currentRootNode.getPackageName() != null && 
+                !currentRootNode.getPackageName().toString().equals(BOSS_PACKAGE_NAME)) {
+                logMessage("检测到已退出BOSS直聘，尝试重启APP");
+                    handler.postDelayed(() -> restartBossApp(), APP_OPERATION_DELAY);
+                return;
+            }
+        }
+        
+        // 在返回前记录当前界面类型
+        AccessibilityNodeInfo rootNodeBeforeBack = getRootInActiveWindow();
+        if (rootNodeBeforeBack != null) {
+            previousPageType = getCurrentPageType(rootNodeBeforeBack);
+            logMessage("返回前界面类型: " + (previousPageType != null ? previousPageType.toString() : "未知"));
+        }
+        
+        // 更新最后返回操作时间
+        lastBackOperationTime = System.currentTimeMillis();
+        
+        // 执行第一次返回
+        performGlobalAction(GLOBAL_ACTION_BACK);
+        logMessage("执行第一次返回操作");
+        
+        // 如果需要多次返回
+        if (times > 1) {
+            // 延迟后执行第二次返回
+        handler.postDelayed(() -> {
+                // 检查是否已经回到主界面
+                AccessibilityNodeInfo rootNodeAfterFirstBack = getRootInActiveWindow();
+                if (rootNodeAfterFirstBack != null) {
+                // 检查是否有"再按一次退出程序"提示
+                    List<AccessibilityNodeInfo> exitPromptNodes = rootNodeAfterFirstBack.findAccessibilityNodeInfosByText("再按一次退出");
                 if (!exitPromptNodes.isEmpty()) {
-                    logMessage("检测到退出提示，已在职位主界面，禁止执行返回操作，直接开始查找职位");
+                        logMessage("第一次返回后检测到退出提示，已在职位主界面，禁止继续返回，直接开始查找职位");
                     handler.postDelayed(() -> findAndClickJobs(getRootInActiveWindow()), MAIN_PAGE_LOAD_DELAY);
                     return;
                 }
                 
-                // 检查当前包名，判断是否已退出BOSS直聘
-                if (currentRootNode.getPackageName() != null && 
-                    !currentRootNode.getPackageName().toString().equals(BOSS_PACKAGE_NAME)) {
-                    logMessage("检测到已退出BOSS直聘，尝试重启APP");
-                    handler.postDelayed(() -> restartBossApp(), APP_OPERATION_DELAY);
-                    return;
-                }
-            }
-            
-            // 在返回前记录当前界面类型
-            AccessibilityNodeInfo rootNodeBeforeBack = getRootInActiveWindow();
-            if (rootNodeBeforeBack != null) {
-                previousPageType = getCurrentPageType(rootNodeBeforeBack);
-                logMessage("返回前界面类型: " + (previousPageType != null ? previousPageType.toString() : "未知"));
-            }
-            
-            // 更新最后返回操作时间
-            lastBackOperationTime = System.currentTimeMillis();
-            
-            // 执行第一次返回
-            performGlobalAction(GLOBAL_ACTION_BACK);
-            logMessage("执行第一次返回操作");
-            
-        // 如果需要多次返回
-        if (times > 1) {
-            // 延迟后执行第二次返回
-            handler.postDelayed(() -> {
-                // 检查是否已经回到主界面
-                AccessibilityNodeInfo rootNodeAfterFirstBack = getRootInActiveWindow();
-                if (rootNodeAfterFirstBack != null) {
-                    // 检查是否有"再按一次退出程序"提示
-                    List<AccessibilityNodeInfo> exitPromptNodes = rootNodeAfterFirstBack.findAccessibilityNodeInfosByText("再按一次退出");
-                    if (!exitPromptNodes.isEmpty()) {
-                        logMessage("第一次返回后检测到退出提示，已在职位主界面，禁止继续返回，直接开始查找职位");
-                        handler.postDelayed(() -> findAndClickJobs(getRootInActiveWindow()), MAIN_PAGE_LOAD_DELAY);
-                        return;
-                    }
-                    
                     // 执行第二次返回
-                                lastBackOperationTime = System.currentTimeMillis();
-                                performGlobalAction(GLOBAL_ACTION_BACK);
-                                logMessage("执行第二次返回操作");
-                                
+                            lastBackOperationTime = System.currentTimeMillis();
+                            performGlobalAction(GLOBAL_ACTION_BACK);
+                            logMessage("执行第二次返回操作");
+                            
                     // 延迟后检查是否回到主界面
-                                handler.postDelayed(() -> {
+                            handler.postDelayed(() -> {
                         AccessibilityNodeInfo rootNodeAfterSecondBack = getRootInActiveWindow();
                         if (rootNodeAfterSecondBack != null) {
-                                        // 检查是否有"再按一次退出程序"提示
+                                    // 检查是否有"再按一次退出程序"提示
                             List<AccessibilityNodeInfo> secondExitPromptNodes = rootNodeAfterSecondBack.findAccessibilityNodeInfosByText("再按一次退出");
                             if (!secondExitPromptNodes.isEmpty()) {
-                                            logMessage("第二次返回后检测到退出提示，已在职位主界面，直接开始查找职位");
-                                            handler.postDelayed(() -> findAndClickJobs(getRootInActiveWindow()), MAIN_PAGE_LOAD_DELAY);
-                                            return;
-                                        }
-                                        }
-                    }, 1500);
+                                        logMessage("第二次返回后检测到退出提示，已在职位主界面，直接开始查找职位");
+                                        handler.postDelayed(() -> findAndClickJobs(getRootInActiveWindow()), MAIN_PAGE_LOAD_DELAY);
+                                        return;
                                     }
+                                    }
+                    }, 1500);
+                                }
             }, BACK_OPERATION_DELAY);
-                        } else {
+                    } else {
             // 如果只需要返回一次，延迟后检查结果
-                        handler.postDelayed(() -> {
+                    handler.postDelayed(() -> {
                 AccessibilityNodeInfo rootNodeAfterBack = getRootInActiveWindow();
                 if (rootNodeAfterBack != null) {
-                                                        // 检查是否有"再按一次退出程序"提示
+                                                    // 检查是否有"再按一次退出程序"提示
                     List<AccessibilityNodeInfo> exitPromptNodes = rootNodeAfterBack.findAccessibilityNodeInfosByText("再按一次退出");
                     if (!exitPromptNodes.isEmpty()) {
                         logMessage("返回后检测到退出提示，已在职位主界面，直接开始查找职位");
-                                                            handler.postDelayed(() -> findAndClickJobs(getRootInActiveWindow()), MAIN_PAGE_LOAD_DELAY);
+                                                        handler.postDelayed(() -> findAndClickJobs(getRootInActiveWindow()), MAIN_PAGE_LOAD_DELAY);
                     }
                 }
             }, 1500);
     }
-}
+    }
 
     // 修改sendGreetingMessage方法，添加计数功能
     private void sendGreetingMessage() {
@@ -1802,20 +1820,20 @@ public class BossResumeService extends AccessibilityService {
                 
                 // 只有未计数的职位才增加打招呼计数
                 if (!currentJobId.isEmpty() && !hasCountedCurrentJob) {
-                    // 增加打招呼计数
-                    greetingCount++;
+                // 增加打招呼计数
+                greetingCount++;
                     totalCount++; // 同时增加总处理职位数
                     hasCountedCurrentJob = true;
                     logMessage("【新】处理新职位，当前已打招呼次数: " + greetingCount + "/" + MAX_GREETING_COUNT + "，总处理职位: " + totalCount);
-                    
-                    // 检查是否达到最大打招呼次数
+                
+                // 检查是否达到最大打招呼次数
                     if (greetingCount >= MAX_GREETING_COUNT && !isServiceStopping) {
                         logMessage("【重要】已达到最大打招呼次数 " + MAX_GREETING_COUNT + "，准备停止服务");
                         isServiceStopping = true;
-                        handler.postDelayed(() -> {
-                            stopService();
+                    handler.postDelayed(() -> {
+                        stopService();
                         }, 2000);
-                        return;
+                    return;
                     }
                 } else {
                     logMessage("【跳过】当前职位已计数或无效，不增加打招呼次数");
@@ -1937,7 +1955,7 @@ public class BossResumeService extends AccessibilityService {
         
         switch (pageType) {
             case MAIN_LIST:
-                logMessage("检测到主界面，准备查找职位");
+            logMessage("检测到主界面，准备查找职位");
                 handleMainList(rootNode);
                 break;
                 
@@ -1997,39 +2015,102 @@ public class BossResumeService extends AccessibilityService {
         }
     }
 
-    // 检查文本是否包含任何关键词
-    private boolean containsKeywords(String text, List<String> keywordList) {
-        if (text == null || keywordList == null) return false;
-        String lowerText = text.toLowerCase();
-        
-        for (String keyword : keywordList) {
-            if (keyword != null && !keyword.isEmpty() && lowerText.contains(keyword.toLowerCase())) {
-                return true;
-            }
-        }
-        return false;
-    }
-    
-    // 获取文本中匹配到的所有关键词
-    private String getMatchedKeywords(String text, List<String> keywordList) {
-        if (text == null || keywordList == null) return "[]";
-        
-        String lowerText = text.toLowerCase();
-        List<String> matched = new ArrayList<>();
-        
-        for (String keyword : keywordList) {
-            if (keyword != null && !keyword.isEmpty() && lowerText.contains(keyword.toLowerCase())) {
-                matched.add(keyword);
-            }
-        }
-        
-        return matched.toString();
-    }
-    
-    // 查找职位节点
+    // 修改原有的findJobNodes方法，改进职位卡片查找逻辑
     private List<AccessibilityNodeInfo> findJobNodes(AccessibilityNodeInfo rootNode) {
-        // 使用现有的findJobCards方法
-        return findJobCards(rootNode);
+        List<AccessibilityNodeInfo> jobNodes = new ArrayList<>();
+        
+        if (rootNode == null) return jobNodes;
+        
+        // 1. 先找到职位列表RecyclerView
+        List<AccessibilityNodeInfo> rvList = rootNode.findAccessibilityNodeInfosByViewId("com.hpbr.bosszhipin:id/rv_list");
+        if (!rvList.isEmpty() && rvList.get(0) != null) {
+            AccessibilityNodeInfo recyclerView = rvList.get(0);
+            logMessage("找到职位列表RecyclerView");
+            
+            // 2. 遍历RecyclerView的直接子节点
+            for (int i = 0; i < recyclerView.getChildCount(); i++) {
+                AccessibilityNodeInfo cardLayout = recyclerView.getChild(i);
+                if (cardLayout != null) {
+                    // 打印每个卡片的信息
+                    List<AccessibilityNodeInfo> titleNodes = cardLayout.findAccessibilityNodeInfosByViewId("com.hpbr.bosszhipin:id/tv_position_name");
+                    if (!titleNodes.isEmpty() && titleNodes.get(0) != null) {
+                        String jobTitle = titleNodes.get(0).getText() != null ? 
+                            titleNodes.get(0).getText().toString() : "未知职位";
+                        logMessage("发现职位: " + jobTitle);
+                        
+                        // 如果卡片可点击，添加到列表
+                        if (cardLayout.isClickable()) {
+                            jobNodes.add(cardLayout);
+                            logMessage("添加可点击的职位卡片: " + jobTitle);
+                        } else {
+                            logMessage("职位卡片不可点击，跳过: " + jobTitle);
+                        }
+                    } else {
+                        logMessage("第 " + (i+1) + " 个卡片未找到职位名称");
+                    }
+                }
+            }
+        } else {
+            logMessage("未找到职位列表RecyclerView，尝试查找单个职位卡片");
+            
+            // 3. 如果找不到列表，直接查找职位名称
+            List<AccessibilityNodeInfo> allTitleNodes = rootNode.findAccessibilityNodeInfosByViewId("com.hpbr.bosszhipin:id/tv_position_name");
+            for (AccessibilityNodeInfo titleNode : allTitleNodes) {
+                if (titleNode != null && titleNode.getText() != null) {
+                    String jobTitle = titleNode.getText().toString();
+                    logMessage("直接查找到职位: " + jobTitle);
+                    
+                    // 向上查找可点击的父节点
+                    AccessibilityNodeInfo parent = titleNode.getParent();
+                    while (parent != null && !parent.isClickable()) {
+                        parent = parent.getParent();
+                    }
+                    
+                    if (parent != null && parent.isClickable()) {
+                        jobNodes.add(parent);
+                        logMessage("添加可点击的职位卡片(通过父节点): " + jobTitle);
+                    }
+                }
+            }
+        }
+        
+        logMessage("总共找到 " + jobNodes.size() + " 个职位卡片");
+        return jobNodes;
+    }
+    
+    // 处理职位列表页面 - 包含强制滑动和职位名称匹配
+    private void handleMainList(AccessibilityNodeInfo rootNode) {
+        if (rootNode == null) return;
+        
+        // 强制滑动 - 添加强制滑动逻辑，确保在职位列表页面能滑动
+        long currentTime = System.currentTimeMillis();
+        if (currentTime - lastAutoScrollTime >= AUTO_SCROLL_INTERVAL) {
+            logMessage("职位列表页面 - 执行强制滑动刷新");
+            performScrollDown();  // 确保调用滑动方法
+            lastAutoScrollTime = currentTime;
+            
+            // 重置滑动状态，避免被阻止滑动
+            isScrolling = false;
+            
+            // 短暂延迟后再处理职位列表
+            handler.postDelayed(() -> {
+                // 延迟后查找职位节点
+                AccessibilityNodeInfo newRoot = getRootInActiveWindow();
+                if (newRoot != null) {
+                    List<AccessibilityNodeInfo> jobNodes = findJobNodes(newRoot);
+                    logMessage("滑动后找到 " + jobNodes.size() + " 个职位卡片");
+                    processJobNodes(jobNodes);
+                    newRoot.recycle();
+                }
+            }, 800);  // 给滑动一些完成的时间
+            
+            return;  // 滑动后直接返回，等待下一次检查
+        }
+        
+        // 如果不需要滑动，直接处理职位列表
+        List<AccessibilityNodeInfo> jobNodes = findJobNodes(rootNode);
+        logMessage("找到 " + jobNodes.size() + " 个职位卡片");
+        processJobNodes(jobNodes);
     }
 
     // 获取节点的文本内容
@@ -2128,17 +2209,17 @@ public class BossResumeService extends AccessibilityService {
         logMessage("开始执行滑动操作 - 紧急修复版");
         
         try {
-            // 获取屏幕尺寸
-            int screenHeight = getResources().getDisplayMetrics().heightPixels;
-            int screenWidth = getResources().getDisplayMetrics().widthPixels;
-            
+        // 获取屏幕尺寸
+        int screenHeight = getResources().getDisplayMetrics().heightPixels;
+        int screenWidth = getResources().getDisplayMetrics().widthPixels;
+        
             // 创建一个明确的、更长的滑动路径
-            Path path = new Path();
+        Path path = new Path();
             path.moveTo(screenWidth / 2, screenHeight * 0.7f);  // 从屏幕70%位置开始
             path.lineTo(screenWidth / 2, screenHeight * 0.3f);  // 滑动到屏幕30%位置
-            
+        
             // 创建手势描述，使用更长的持续时间（700ms）
-            GestureDescription.Builder gestureBuilder = new GestureDescription.Builder();
+        GestureDescription.Builder gestureBuilder = new GestureDescription.Builder();
             GestureDescription.StrokeDescription stroke = new GestureDescription.StrokeDescription(path, 0, 700);
             gestureBuilder.addStroke(stroke);
             
@@ -2465,33 +2546,44 @@ public class BossResumeService extends AccessibilityService {
         startAppStatusCheck();
     }
 
-    // 执行返回操作
+    // 执行返回操作 - 修复中文引号导致的编译错误
     private void performBackOperation() {
-        // 检查返回操作时间间隔
+        AccessibilityNodeInfo rootNode = getRootInActiveWindow();
+        if (rootNode != null) {
+            PageType currentPage = getCurrentPageType(rootNode);
+            
+            // 如果当前在职位详情页面，检查是否满足最小等待时间
+            if (currentPage == PageType.JOB_DETAIL) {
+                long currentTime = System.currentTimeMillis();
+                if (currentTime - lastStateChangeTime < 5000) { // 至少等待5秒
+                    logMessage("职位详情页面尚未处理完成，取消返回操作");
+                    rootNode.recycle();
+                    return;
+                }
+            }
+            
+            // 如果当前在主界面，不执行返回操作
+            if (currentPage == PageType.MAIN_LIST) {
+                logMessage("当前已在主界面，不执行返回操作");
+                rootNode.recycle();
+                return;
+            }
+            
+            rootNode.recycle();
+        }
+        
+        // 执行返回操作前记录返回时间
         long currentTime = System.currentTimeMillis();
         if (currentTime - lastBackOperationTime < MIN_BACK_INTERVAL) {
-            logMessage("返回操作过于频繁，延迟执行");
+            logMessage("返回操作间隔过短，延迟执行返回");
             handler.postDelayed(this::performBackOperation, MIN_BACK_INTERVAL);
             return;
         }
         
-        // 更新最后返回操作时间
+        // 更新最后返回时间并执行返回
         lastBackOperationTime = currentTime;
-        
-        // 执行返回操作
         logMessage("执行返回操作");
         performGlobalAction(GLOBAL_ACTION_BACK);
-        
-        // 更新连续返回计数
-        consecutiveBackCount++;
-        
-        // 如果连续返回次数过多，添加延迟
-        if (consecutiveBackCount > MAX_CONSECUTIVE_BACKS) {
-            logMessage("检测到连续多次返回，添加额外延迟");
-            handler.postDelayed(() -> {
-                consecutiveBackCount = 0;
-            }, 5000);
-        }
     }
 
     // 添加连续检测计数
@@ -3386,65 +3478,126 @@ public class BossResumeService extends AccessibilityService {
         return textBuilder.toString();
     }
 
-    // 处理职位列表页面
-    private void handleMainList(AccessibilityNodeInfo rootNode) {
-        if (rootNode == null) return;
-        
-        // 查找职位卡片
-        List<AccessibilityNodeInfo> jobNodes = findJobNodes(rootNode);
-        logMessage("找到 " + jobNodes.size() + " 个职位卡片");
-        
-        // 处理职位列表，查找匹配的职位
-        if (!jobNodes.isEmpty()) {
-            boolean foundMatchingJob = false;
-            boolean allChecked = true;
-            
-            // 检查每个职位是否匹配关键词
-            for (AccessibilityNodeInfo jobNode : jobNodes) {
-                if (jobNode == null) continue;
-                
-                String jobNodeText = getTextFromNode(jobNode);
-                boolean containsKeyword = containsKeywords(jobNodeText, keywords);
-                
-                if (containsKeyword) {
-                    foundMatchingJob = true;
-                    logMessage("✓ 匹配成功！在职位中找到关键词: " + getMatchedKeywords(jobNodeText, keywords));
-                    
-                    if (!clickedNodes.contains(jobNodeText)) {
-                        // 点击匹配到的职位
-                        clickedNodes.add(jobNodeText);
-                        logMessage("点击职位: " + jobNodeText);
-                        clickNode(jobNode);
-                        
-                        currentState = State.VIEWING_DETAIL;
-                        totalCount++;
-                        logMessage("当前已处理职位数: " + totalCount + "/" + maxCount);
-                        
-                        if (totalCount >= maxCount) {
-                            logMessage("已达到最大处理数量，停止服务");
-                            stopService();
-                            return;
-                        }
-                        return;
-                    } else if (!clickedNodes.contains(jobNodeText)) {
-                        allChecked = false;
-                        if (!containsKeyword) {
-                            logMessage("✗ 未在职位中匹配到任何关键词，跳过该职位");
-                        }
-                    } else if (containsKeyword) {
-                        logMessage("但该职位已点击过，跳过");
-                    }
+
+
+
+
+    // 处理职位节点 - 只匹配职位名称
+    private void processJobNodes(List<AccessibilityNodeInfo> jobNodes) {
+        if (jobNodes.isEmpty()) {
+            logMessage("未找到职位卡片，将在下次检查时滑动");
+            return;
+        }
+
+        boolean foundMatchingJob = false;
+
+        // 检查每个职位是否匹配关键词
+        for (AccessibilityNodeInfo jobNode : jobNodes) {
+            if (jobNode == null) continue;
+
+            // 查找职位名称节点 - 使用特定资源ID
+            List<AccessibilityNodeInfo> titleNodes = jobNode.findAccessibilityNodeInfosByViewId("com.hpbr.bosszhipin:id/tv_position_name");
+            if (titleNodes.isEmpty() || titleNodes.get(0) == null || titleNodes.get(0).getText() == null) {
+                continue; // 跳过没有职位名称的卡片
+            }
+
+            // 只获取职位名称文本进行匹配
+            String jobTitle = titleNodes.get(0).getText().toString();
+            logMessage("检查职位名称: " + jobTitle);
+
+            // 使用职位名称与关键词匹配
+            boolean containsKeyword = containsKeywords(jobTitle, keywords);
+
+            if (containsKeyword) {
+                foundMatchingJob = true;
+                logMessage("✓ 匹配成功！在职位名称中找到关键词: " + getMatchedKeywords(jobTitle, keywords));
+
+                // 生成唯一ID，避免重复点击相同职位
+                String uniqueId = jobTitle;
+                List<AccessibilityNodeInfo> companyNodes = jobNode.findAccessibilityNodeInfosByViewId("com.hpbr.bosszhipin:id/tv_company_name");
+                if (!companyNodes.isEmpty() && companyNodes.get(0) != null && companyNodes.get(0).getText() != null) {
+                    uniqueId += "_" + companyNodes.get(0).getText().toString();
                 }
+
+                if (!clickedNodes.contains(uniqueId)) {
+                    // 点击匹配到的职位
+                    clickedNodes.add(uniqueId);
+                    logMessage("点击职位: " + jobTitle);
+                    clickNode(jobNode);
+
+                    currentState = State.VIEWING_DETAIL;
+                    totalCount++;
+                    logMessage("当前已处理职位数: " + totalCount + "/" + maxCount);
+
+                    if (totalCount >= maxCount) {
+                        logMessage("已达到最大处理数量，停止服务");
+                        stopService();
+                    }
+                    return;
+                } else {
+                    logMessage("该职位已点击过，跳过");
+                }
+            } else {
+                logMessage("✗ 未在职位名称中匹配到关键词，跳过");
             }
         }
-        
-        // 自动滑动逻辑 - 每隔3秒自动滑动一次
-        long currentTime = System.currentTimeMillis();
-        if (currentTime - lastAutoScrollTime >= AUTO_SCROLL_INTERVAL) {
-            logMessage("执行定时自动滑动刷新");
-            performScrollDown();  // 使用一个不同的名称调用滑动方法
-            lastAutoScrollTime = currentTime;
+
+        if (!foundMatchingJob) {
+            logMessage("在当前页面未找到匹配的职位，将在下次检查时滑动");
         }
+    }
+
+    // 获取职位卡片中的公司名称，用于生成唯一ID
+    private String getCompanyFromJobNode(AccessibilityNodeInfo jobNode) {
+        if (jobNode == null) return "";
+
+        List<AccessibilityNodeInfo> companyNodes = jobNode.findAccessibilityNodeInfosByViewId("com.hpbr.bosszhipin:id/tv_company_name");
+        if (!companyNodes.isEmpty() && companyNodes.get(0) != null && companyNodes.get(0).getText() != null) {
+            return companyNodes.get(0).getText().toString();
+        }
+
+        return "";
+    }
+
+    // 修改关键词匹配方法，提高精确度
+    private boolean containsKeywords(String text, List<String> keywords) {
+        if (text == null || text.isEmpty() || keywords.isEmpty()) {
+            return false;
+        }
+
+        // 转换为小写进行比较，提高匹配准确性
+        String lowerText = text.toLowerCase();
+
+        for (String keyword : keywords) {
+            if (keyword.isEmpty()) continue;
+
+            // 使用小写比较避免大小写问题
+            if (lowerText.contains(keyword.toLowerCase())) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // 获取匹配到的关键词列表，用于日志
+    private String getMatchedKeywords(String text, List<String> keywords) {
+        if (text == null || text.isEmpty() || keywords.isEmpty()) {
+            return "[]";
+        }
+
+        List<String> matched = new ArrayList<>();
+        String lowerText = text.toLowerCase();
+
+        for (String keyword : keywords) {
+            if (keyword.isEmpty()) continue;
+
+            if (lowerText.contains(keyword.toLowerCase())) {
+                matched.add(keyword);
+            }
+        }
+
+        return matched.toString();
     }
 
     // 添加用于跟踪职位列表的变量
@@ -3467,12 +3620,12 @@ public class BossResumeService extends AccessibilityService {
                 Thread.sleep(500);
             } catch (InterruptedException e) {}
         }
-        
+
         // 然后处理职位信息
         // ... 现有代码 ...
     }
 
-    // 向下滑动方法 - 重命名为performScrollDown
+    // 向下滑动方法 - 增加滑动幅度
     private void performScrollDown() {
         logMessage("开始执行滑动操作 - 强制滑动模式");
         
@@ -3482,24 +3635,130 @@ public class BossResumeService extends AccessibilityService {
             int screenHeight = displayMetrics.heightPixels;
             int screenWidth = displayMetrics.widthPixels;
             
-            // 创建一个更明确的滑动路径和更大的距离
+            // 创建一个更大幅度的滑动路径
             Path path = new Path();
-            path.moveTo(screenWidth / 2, (int)(screenHeight * 0.8f));  // 从屏幕80%位置开始
-            path.lineTo(screenWidth / 2, (int)(screenHeight * 0.2f));  // 滑动到屏幕20%位置
+            path.moveTo(screenWidth / 2, (int)(screenHeight * 0.9f));  // 从屏幕90%位置开始
+            path.lineTo(screenWidth / 2, (int)(screenHeight * 0.1f));  // 滑动到屏幕10%位置
             
-            // 创建手势描述，使用更短的持续时间以增加滑动速度
+            // 创建手势描述，使用适当的持续时间以确保滑动效果
             GestureDescription.Builder gestureBuilder = new GestureDescription.Builder();
-            GestureDescription.StrokeDescription stroke = new GestureDescription.StrokeDescription(path, 0, 300);
+            GestureDescription.StrokeDescription stroke = new GestureDescription.StrokeDescription(path, 0, 400);
             gestureBuilder.addStroke(stroke);
             
             // 执行手势
             boolean result = dispatchGesture(gestureBuilder.build(), null, null);
-            logMessage("滑动手势执行状态: " + (result ? "成功" : "失败"));
+            logMessage("滑动手势执行状态: " + (result ? "成功" : "失败") + ", 幅度: 90%->10%");
             
             // 强制更新滑动时间戳
             lastAutoScrollTime = System.currentTimeMillis();
         } catch (Exception e) {
             logMessage("滑动时发生异常: " + e.getMessage());
+        }
+    }
+
+    // 处理职位详情页面 - 修复点击职位后立即返回的问题
+    private void handleJobDetailPage(AccessibilityNodeInfo rootNode) {
+        if (rootNode == null) return;
+        
+        // 添加足够的等待时间，确保页面完全加载
+        long currentTime = System.currentTimeMillis();
+        if (currentTime - lastStateChangeTime < 3000) {
+            logMessage("职位详情页面刚刚加载，等待界面稳定...");
+            return;  // 等待页面完全加载
+        }
+        
+        // 查找立即沟通或继续沟通按钮
+        List<AccessibilityNodeInfo> chatButtons = rootNode.findAccessibilityNodeInfosByViewId("com.hpbr.bosszhipin:id/btn_chat");
+        if (!chatButtons.isEmpty()) {
+            AccessibilityNodeInfo chatButton = chatButtons.get(0);
+            if (chatButton != null && chatButton.isClickable()) {
+                String buttonText = chatButton.getText() != null ? chatButton.getText().toString() : "";
+                
+                // 根据按钮文本决定操作
+                if ("立即沟通".equals(buttonText)) {
+                    logMessage("找到立即沟通按钮，执行点击");
+                    clickNode(chatButton);
+                    lastStateChangeTime = currentTime;  // 更新状态变化时间
+                    currentState = State.COMMUNICATING;
+                    greetingCount++;
+                    return;
+                } 
+                else if ("继续沟通".equals(buttonText)) {
+                    logMessage("找到继续沟通按钮，等待2秒后返回");
+                    handler.postDelayed(() -> {
+                        performGlobalAction(GLOBAL_ACTION_BACK);
+                        logMessage("执行返回操作");
+                    }, 2000);
+                    return;
+                }
+            }
+            
+            if (chatButton != null) {
+                chatButton.recycle();
+            }
+        }
+        
+        // 添加最大等待时间，如果超过10秒仍未找到沟通按钮，则执行返回
+        if (currentTime - lastStateChangeTime > 10000) {
+            logMessage("职位详情页面等待超时(10秒)，未找到沟通按钮，执行返回");
+            performGlobalAction(GLOBAL_ACTION_BACK);
+            lastStateChangeTime = currentTime;  // 更新状态变化时间
+            return;
+        }
+        
+        logMessage("职位详情页面未找到沟通按钮，继续等待...");
+    }
+
+    // 主要处理方法 - 确保在正确的地方调用handleJobDetailPage
+    private void processAccessibilityEvent() {
+        // 获取当前界面根节点
+        AccessibilityNodeInfo rootNode = getRootInActiveWindow();
+        if (rootNode == null) {
+            logMessage("无法获取界面信息，跳过处理");
+            return;
+        }
+        
+        try {
+            // 获取当前页面类型
+            PageType currentPage = getCurrentPageType(rootNode);
+            logMessage("【界面检测】当前所在页面：" + getPageTypeString(currentPage));
+            
+            // 根据不同页面类型执行不同操作
+            if (currentPage == PageType.MAIN_LIST) {
+                // 在职位列表页面，处理列表或滑动
+                handleMainList(rootNode);
+            } else if (currentPage == PageType.JOB_DETAIL) {
+                // 在职位详情页面，处理沟通按钮
+                handleJobDetailPage(rootNode);
+                return; // 重要：处理完详情页后直接返回，不执行其他操作
+            } else if (currentPage == PageType.CHAT_PAGE) {
+                // 在聊天页面，处理沟通
+                handleChatPage(rootNode);
+                return; // 重要：处理完聊天页后直接返回，不执行其他操作
+            } else {
+                // 未知页面，尝试返回主界面，除非我们刚从主界面过来
+                if (previousPageType == PageType.MAIN_LIST) {
+                    logMessage("从主界面进入未知页面，可能是弹窗，尝试继续操作");
+                    // 延迟后再次检查
+                    handler.postDelayed(this::processAccessibilityEvent, 1000);
+                } else {
+                    logMessage("在未知界面，尝试返回");
+                    performBackOperation();
+                }
+            }
+        } finally {
+            rootNode.recycle();
+        }
+    }
+    
+    // 添加帮助方法，获取页面类型的描述字符串
+    private String getPageTypeString(PageType pageType) {
+        if (pageType == null) return "未知页面";
+        switch (pageType) {
+            case MAIN_LIST: return "职位列表主页面";
+            case JOB_DETAIL: return "职位详情页面";
+            case CHAT_PAGE: return "聊天页面";
+            default: return "未定义页面";
         }
     }
 
