@@ -11,6 +11,7 @@ import android.os.Handler;
 import android.provider.Settings;
 import android.text.Editable;
 import android.text.TextWatcher;
+import android.util.Log;
 import android.view.accessibility.AccessibilityManager;
 import android.view.View;
 import android.widget.AdapterView;
@@ -31,6 +32,7 @@ public class MainActivity extends AppCompatActivity {
     public static final String ACTION_SERVICE_STATUS_CHANGED = "com.example.bossresume.ACTION_SERVICE_STATUS_CHANGED";
     public static final String PREF_NAME = "BossResumePrefs";
     public static final String KEY_KEYWORDS = "keywords";
+    private static final String TAG = "MainActivity";
 
     private TextView tvStatus;
     private TextView tvLog;
@@ -228,20 +230,56 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void startService() {
-        if (!isServiceRunning) {  // 只有在服务未运行时才启动
-            Intent intent = new Intent(this, BossResumeService.class);
-            intent.setAction(BossResumeService.ACTION_START);
-            // 添加关键词到Intent
-            intent.putExtra(KEY_KEYWORDS, etKeywords.getText().toString().trim());
-            startService(intent);
-            updateServiceStatus(true);  // 只在用户点击开始时更新状态
-            Toast.makeText(this, "服务已启动", Toast.LENGTH_SHORT).show();
-            
-            // 启动BOSS直聘APP
-            Handler handler = new Handler();
-            handler.postDelayed(() -> {
-                BossResumeService.launchBossApp(this);
-            }, 500);
+        // 从自定义关键词输入框或下拉列表获取关键词
+        String keywords;
+        // 先检查选择的是哪个关键词类别
+        String selectedCategory = jobCategorySpinner.getSelectedItem().toString();
+        
+        if ("自定义关键词".equals(selectedCategory)) {
+            // 使用用户输入的关键词
+            keywords = etKeywords.getText().toString();
+            Log.d(TAG, "使用自定义关键词: " + keywords);
+        } else {
+            // 使用预设的关键词列表
+            keywords = getCategoryKeywords(selectedCategory);
+            Log.d(TAG, "使用预设关键词类别: " + selectedCategory + ", 关键词: " + keywords);
+        }
+        
+        // 使用统一的SharedPreferences名称
+        SharedPreferences sharedPreferences = getSharedPreferences("boss_resume_prefs", MODE_PRIVATE);
+        SharedPreferences.Editor editor = sharedPreferences.edit();
+        editor.putString("keywords", keywords);
+        editor.putString("selected_category", selectedCategory); // 保存选择的类别
+        editor.apply();
+        
+        Log.d(TAG, "保存用户关键词到SharedPreferences: " + keywords);
+        
+        // 创建服务启动Intent
+        Intent intent = new Intent(this, BossResumeService.class);
+        intent.setAction(BossResumeService.ACTION_START);
+        startService(intent);
+    }
+
+    // 根据类别获取预设的关键词
+    private String getCategoryKeywords(String category) {
+        switch (category) {
+            case "运维":
+                return "运维,docker,k8s,系统运维,集群运维,kubernetes,devops,PaaS,应用运维,交付,迁移,K8S,运维开发,云计算,实施,业务运维,SRE,sre,云平台,linux,DevOps,公有云,私有云,基础架构,容器";
+            case "Java开发":
+                return "高级后端,后端,Java,开发,开发工程师,项目开发,研发,服务端研发,java开发,Java开发,JAVA,后端开发,高级Java";
+            case "产品经理":
+                return "产品,产品经理,产品,产品专家,数字化专家,软件产品经理,B端产品经理,C端,高级产品经理,AI产品经理,app产品经理";
+            case "前端开发":
+                return "前端,前端开发,web前端,react,vue,web3,前端工程师,H5,H5开发,TypeScript,资深前端,高级前端,React,小程序,Vue";
+            case "测试":
+                return "测试,高级测试,系统测试,软件测试,测试工程师,后端测试,功能测试,app测试,自动化测试,业务测试";
+            case "销售":
+                return "销售,销售专员,销售经理,业务销售,软件销售,销售顾问,电话销售,网络销售,销售代表,大客户销售,客户销售";
+            case "运营":
+                return "运营专员,运营经理,运营,运营助理,渠道运营,技术运营,抖音运营,独立站运营,产品运营,内容运营,用户运营,活动运营,电商运营,跨境电商运营,新媒体运营,网站运营,社区运营,直播运营,游戏运营,数据运营,车辆运营,策略运营";
+            default:
+                // 如果没有找到匹配的类别，返回空字符串
+                return "";
         }
     }
 
