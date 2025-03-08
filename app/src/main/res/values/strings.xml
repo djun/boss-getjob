@@ -5,7 +5,7 @@
     <string name="stop_service">停止投递</string>
     <string name="service_status">服务状态：未启动</string>
     <string name="open_accessibility_settings">打开无障碍设置</string>
-    <string name="app_version">1.3.0</string>
+    <string name="app_version">1.3.1.250308</string>
     <string name="version_info">当前版本: %s</string>
     <string name="keywords_label">设置关键词用于匹配职位(多个关键词用逗号分隔)</string>
     <string name="keywords_hint">例如: 运维,docker,kubernetes,devops</string>
