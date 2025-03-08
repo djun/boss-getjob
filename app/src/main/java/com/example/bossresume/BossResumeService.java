@@ -30,6 +30,7 @@ public class BossResumeService extends AccessibilityService {
     
     // 添加常量定义
     private static final int SCROLL_COOLDOWN = 1000; // 滑动冷却时间1秒
+
     
     private boolean isRunning = false;
     private int totalCount = 0;
@@ -639,17 +640,21 @@ public class BossResumeService extends AccessibilityService {
                             isServiceStopping = false;
                             
                             // 先获取关键词
-                            SharedPreferences sharedPreferences = getSharedPreferences("app_settings", Context.MODE_PRIVATE);
-                            String keywordsString = sharedPreferences.getString("keywords", "运维,docker,k8s,系统运维,集群运维,kubernetes,devops");
+                            SharedPreferences sharedPreferences = getSharedPreferences("boss_resume_prefs", Context.MODE_PRIVATE);
+                            String keywordsString = sharedPreferences.getString("keywords", "");
+                            logMessage("=================== 关键词信息 ===================");
                             logMessage("从SharedPreferences获取到的原始关键词字符串: " + keywordsString);
                             
                             // 使用默认关键词，确保不会为空
                             if (keywordsString.isEmpty()) {
                                 keywordsString = "运维,docker,k8s,系统运维,集群运维,kubernetes,devops";
                                 logMessage("使用默认关键词: " + keywordsString);
+                            } else {
+                                logMessage("使用用户自定义关键词: " + keywordsString);
                             }
                             
                             String[] keywordArray = keywordsString.split(",");
+                            logMessage("关键词拆分后的数组长度: " + keywordArray.length);
                             
                             // 使用ArrayList而不是Arrays.asList，因为后者返回的是固定大小的不可修改列表
                             keywords = new ArrayList<>(Arrays.asList(keywordArray));
@@ -657,7 +662,13 @@ public class BossResumeService extends AccessibilityService {
                             // 清理空字符串
                             keywords.removeIf(String::isEmpty);
                             
+                            logMessage("关键词列表详情:");
+                            for (int i = 0; i < keywords.size(); i++) {
+                                logMessage("  " + (i+1) + ". [" + keywords.get(i) + "]");
+                            }
                             logMessage("转换后的关键词列表: " + keywords);
+                            logMessage("关键词总数: " + keywords.size());
+                            logMessage("================================================");
                             
                             if (keywords.isEmpty() || (keywords.size() == 1 && keywords.get(0).isEmpty())) {
                                 logMessage("警告：关键词列表为空或只包含空字符串");
@@ -688,6 +699,9 @@ public class BossResumeService extends AccessibilityService {
                             Intent statusIntent = new Intent(MainActivity.ACTION_SERVICE_STATUS_CHANGED);
                             statusIntent.putExtra("running", true);
                             sendBroadcast(statusIntent);
+                            
+                            // 启动强制滑动定时器
+                            setupForcedScrollTimer();
                             
                             logMessage("服务已启动，当前使用的关键词列表: " + keywords);
                         }
@@ -854,7 +868,13 @@ public class BossResumeService extends AccessibilityService {
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
-        logMessage("无障碍服务已连接");
+        logMessage("Boss直聘自动投递服务已连接");
+        
+        // 初始化Handler
+        handler = new Handler(Looper.getMainLooper());
+        
+        // 初始化检测Handler
+        checkHandler = new Handler(Looper.getMainLooper());
         
         // 获取屏幕尺寸
         screenWidth = getResources().getDisplayMetrics().widthPixels;
@@ -865,6 +885,9 @@ public class BossResumeService extends AccessibilityService {
         
         // 添加服务看门狗，确保服务持续运行
         startServiceWatchdog();
+        
+        // 启动强制滑动定时器
+        setupForcedScrollTimer();
     }
     
     // 移除服务监视器启动方法中的重启逻辑
@@ -2082,12 +2105,23 @@ public class BossResumeService extends AccessibilityService {
     private void handleMainList(AccessibilityNodeInfo rootNode) {
         if (rootNode == null) return;
         
-        // 强制滑动 - 添加强制滑动逻辑，确保在职位列表页面能滑动
+        // 在执行列表操作前，检查并重置返回锁定状态
         long currentTime = System.currentTimeMillis();
+        if (isReturnLocked && currentTime - returnLockTime > 2000) {
+            isReturnLocked = false;
+            logMessage("重置返回锁定，允许列表页面操作");
+        }
+        
+        // 计算距离上次滑动的时间
+        long timeSinceLastScroll = currentTime - lastAutoScrollTime;
+        logMessage("距离上次滑动已经过去: " + (timeSinceLastScroll / 1000) + "秒, 设定间隔: " + (AUTO_SCROLL_INTERVAL / 1000) + "秒");
+        
+        // 强制滑动 - 恢复原有的强制滑动逻辑
         if (currentTime - lastAutoScrollTime >= AUTO_SCROLL_INTERVAL) {
             logMessage("职位列表页面 - 执行强制滑动刷新");
             performScrollDown();  // 确保调用滑动方法
             lastAutoScrollTime = currentTime;
+            logMessage("更新最后滑动时间戳: " + lastAutoScrollTime);
             
             // 重置滑动状态，避免被阻止滑动
             isScrolling = false;
@@ -2107,10 +2141,17 @@ public class BossResumeService extends AccessibilityService {
             return;  // 滑动后直接返回，等待下一次检查
         }
         
-        // 如果不需要滑动，直接处理职位列表
+        // 查找职位卡片并处理
         List<AccessibilityNodeInfo> jobNodes = findJobNodes(rootNode);
-        logMessage("找到 " + jobNodes.size() + " 个职位卡片");
-        processJobNodes(jobNodes);
+        
+        if (!jobNodes.isEmpty()) {
+            logMessage("找到 " + jobNodes.size() + " 个职位卡片");
+            processJobNodes(jobNodes);
+        } else {
+            // 如果没找到职位卡片，尝试滑动刷新
+            logMessage("未找到职位卡片，尝试滑动刷新");
+            performScrollDown();
+        }
     }
 
     // 获取节点的文本内容
@@ -2548,42 +2589,28 @@ public class BossResumeService extends AccessibilityService {
 
     // 执行返回操作 - 修复中文引号导致的编译错误
     private void performBackOperation() {
-        AccessibilityNodeInfo rootNode = getRootInActiveWindow();
-        if (rootNode != null) {
-            PageType currentPage = getCurrentPageType(rootNode);
-            
-            // 如果当前在职位详情页面，检查是否满足最小等待时间
-            if (currentPage == PageType.JOB_DETAIL) {
-                long currentTime = System.currentTimeMillis();
-                if (currentTime - lastStateChangeTime < 5000) { // 至少等待5秒
-                    logMessage("职位详情页面尚未处理完成，取消返回操作");
-                    rootNode.recycle();
-                    return;
-                }
-            }
-            
-            // 如果当前在主界面，不执行返回操作
-            if (currentPage == PageType.MAIN_LIST) {
-                logMessage("当前已在主界面，不执行返回操作");
-                rootNode.recycle();
-                return;
-            }
-            
-            rootNode.recycle();
-        }
-        
-        // 执行返回操作前记录返回时间
+        // 记录当前时间用于锁定
         long currentTime = System.currentTimeMillis();
-        if (currentTime - lastBackOperationTime < MIN_BACK_INTERVAL) {
-            logMessage("返回操作间隔过短，延迟执行返回");
-            handler.postDelayed(this::performBackOperation, MIN_BACK_INTERVAL);
+        
+        // 如果已经锁定，不执行重复返回
+        if (isReturnLocked && System.currentTimeMillis() - returnLockTime < RETURN_LOCK_DURATION) {
+            logMessage("返回操作已锁定，忽略重复返回请求");
             return;
         }
         
-        // 更新最后返回时间并执行返回
-        lastBackOperationTime = currentTime;
-        logMessage("执行返回操作");
-        performGlobalAction(GLOBAL_ACTION_BACK);
+        // 执行返回操作
+        boolean result = performGlobalAction(GLOBAL_ACTION_BACK);
+        logMessage("执行返回操作" + (result ? "" : " - 失败"));
+        
+        // 锁定返回操作，但不锁定太久，避免影响列表页面操作
+        isReturnLocked = true;
+        returnLockTime = currentTime;
+        
+        // 在2秒后自动解除锁定，确保不会影响主界面操作
+        handler.postDelayed(() -> {
+            isReturnLocked = false;
+            logMessage("自动解除返回锁定");
+        }, 2000);
     }
 
     // 添加连续检测计数
@@ -3258,7 +3285,7 @@ public class BossResumeService extends AccessibilityService {
 
     // 添加新的变量来跟踪页面状态
     private long lastDetailPageTime = 0; // 进入职位详情页的时间
-    private static final int DETAIL_PAGE_TIMEOUT = 5000; // 职位详情页停留超时时间（5秒）
+    private static final int DETAIL_PAGE_TIMEOUT = 3000; // 职位详情页停留超时时间（3秒）
 
     // 添加新的变量
     private Handler checkHandler = new Handler(Looper.getMainLooper());
@@ -3268,6 +3295,11 @@ public class BossResumeService extends AccessibilityService {
     // 添加变量记录最后一次窗口类名
     private String lastWindowClassName = null;
 
+    // 添加新的变量，用于锁定返回操作
+    private boolean isReturnLocked = false;
+    private long returnLockTime = 0;
+    private static final long RETURN_LOCK_DURATION = 3000; // 返回锁定时间3秒
+    
     @Override
     public void onCreate() {
         super.onCreate();
@@ -3359,7 +3391,7 @@ public class BossResumeService extends AccessibilityService {
                     logMessage("职位详情页面停留时间还剩：" + (remainingTime / 1000) + "秒");
                 }
                 if (currentTime - lastDetailPageTime > DETAIL_PAGE_TIMEOUT) {
-                    logMessage("在职位详情页停留超过5秒，执行返回操作");
+                    logMessage("在职位详情页停留超过3秒，执行返回操作");
                     lastDetailPageTime = 0; // 重置计时器
                     performBackOperation();
                 }
@@ -3605,7 +3637,7 @@ public class BossResumeService extends AccessibilityService {
     private int stuckCount = 0;
 
     private long lastAutoScrollTime = 0;
-    private static final long AUTO_SCROLL_INTERVAL = 3000; // 3秒自动滑动一次
+    private static final long AUTO_SCROLL_INTERVAL = 7000; // 7秒自动滑动一次，增加间隔确保滑动稳定
 
     // 处理在主界面时的操作
     private void processMainPage(AccessibilityNodeInfo rootNode) {
@@ -3627,6 +3659,10 @@ public class BossResumeService extends AccessibilityService {
 
     // 向下滑动方法 - 增加滑动幅度
     private void performScrollDown() {
+        // 临时解除返回锁定以允许滑动
+        boolean wasLocked = isReturnLocked;
+        isReturnLocked = false;
+        
         logMessage("开始执行滑动操作 - 强制滑动模式");
         
         try {
@@ -3651,8 +3687,13 @@ public class BossResumeService extends AccessibilityService {
             
             // 强制更新滑动时间戳
             lastAutoScrollTime = System.currentTimeMillis();
+            isScrolling = true;
+            logMessage("已更新滑动时间戳: " + lastAutoScrollTime);
         } catch (Exception e) {
             logMessage("滑动时发生异常: " + e.getMessage());
+        } finally {
+            // 恢复之前的锁定状态
+            isReturnLocked = wasLocked;
         }
     }
 
@@ -3660,11 +3701,24 @@ public class BossResumeService extends AccessibilityService {
     private void handleJobDetailPage(AccessibilityNodeInfo rootNode) {
         if (rootNode == null) return;
         
-        // 添加足够的等待时间，确保页面完全加载
         long currentTime = System.currentTimeMillis();
-        if (currentTime - lastStateChangeTime < 3000) {
-            logMessage("职位详情页面刚刚加载，等待界面稳定...");
-            return;  // 等待页面完全加载
+        
+        // 检查返回锁定状态
+        if (isReturnLocked) {
+            // 如果锁定已超时，解除锁定
+            if (currentTime - returnLockTime > RETURN_LOCK_DURATION) {
+                isReturnLocked = false;
+                logMessage("返回锁定已超时，解除锁定");
+            } else {
+                logMessage("返回操作已锁定，跳过处理");
+                return;
+            }
+        }
+        
+        // 首次进入职位详情页，记录时间
+        if (lastDetailPageTime == 0) {
+            lastDetailPageTime = currentTime;
+            logMessage("进入职位详情页面，开始计时");
         }
         
         // 查找立即沟通或继续沟通按钮
@@ -3674,39 +3728,45 @@ public class BossResumeService extends AccessibilityService {
             if (chatButton != null && chatButton.isClickable()) {
                 String buttonText = chatButton.getText() != null ? chatButton.getText().toString() : "";
                 
-                // 根据按钮文本决定操作
                 if ("立即沟通".equals(buttonText)) {
                     logMessage("找到立即沟通按钮，执行点击");
                     clickNode(chatButton);
-                    lastStateChangeTime = currentTime;  // 更新状态变化时间
-                    currentState = State.COMMUNICATING;
-                    greetingCount++;
+                    // 点击后锁定返回操作，防止干扰
+                    isReturnLocked = true;
+                    returnLockTime = currentTime;
+                    lastDetailPageTime = 0;  // 重置计时器
                     return;
                 } 
                 else if ("继续沟通".equals(buttonText)) {
-                    logMessage("找到继续沟通按钮，等待2秒后返回");
-                    handler.postDelayed(() -> {
-                        performGlobalAction(GLOBAL_ACTION_BACK);
-                        logMessage("执行返回操作");
-                    }, 2000);
+                    logMessage("检测到继续沟通按钮，说明已经沟通过，直接返回职位列表");
+                    // 锁定返回操作，防止重复执行
+                    isReturnLocked = true;
+                    returnLockTime = currentTime;
+                    performBackOperation();
+                    lastDetailPageTime = 0;  // 重置计时器
+                    lastBackOperationTime = currentTime;  // 记录返回操作时间
                     return;
                 }
             }
-            
-            if (chatButton != null) {
-                chatButton.recycle();
-            }
         }
         
-        // 添加最大等待时间，如果超过10秒仍未找到沟通按钮，则执行返回
-        if (currentTime - lastStateChangeTime > 10000) {
-            logMessage("职位详情页面等待超时(10秒)，未找到沟通按钮，执行返回");
-            performGlobalAction(GLOBAL_ACTION_BACK);
-            lastStateChangeTime = currentTime;  // 更新状态变化时间
-            return;
-        }
+        // 计算停留时间
+        long stayTime = currentTime - lastDetailPageTime;
         
-        logMessage("职位详情页面未找到沟通按钮，继续等待...");
+        // 超时处理
+        if (stayTime > DETAIL_PAGE_TIMEOUT) {
+            logMessage("在职位详情页停留超过3秒，执行返回操作");
+            // 锁定返回操作，防止重复执行
+            isReturnLocked = true;
+            returnLockTime = currentTime;
+            lastDetailPageTime = 0; // 重置计时器
+            performBackOperation();
+            lastBackOperationTime = currentTime;  // 记录返回操作时间
+            return; // 添加返回确保不会继续处理
+        } else {
+            long remainingTime = DETAIL_PAGE_TIMEOUT - stayTime;
+            logMessage("职位详情页面停留时间还剩：" + (remainingTime / 1000) + "秒");
+        }
     }
 
     // 主要处理方法 - 确保在正确的地方调用handleJobDetailPage
@@ -3762,4 +3822,56 @@ public class BossResumeService extends AccessibilityService {
         }
     }
 
+    // 检查职位是否匹配关键词
+    private boolean isJobMatched(String jobTitle) {
+        logMessage("------ 职位匹配检查 ------");
+        logMessage("检查职位: [" + jobTitle + "]");
+        logMessage("当前关键词列表: " + keywords);
+        
+        if (keywords.isEmpty()) {
+            logMessage("关键词列表为空，默认所有职位都匹配");
+            return true;  // 如果没有设置关键词，则匹配所有职位
+        }
+        
+        for (String keyword : keywords) {
+            if (jobTitle.contains(keyword)) {
+                logMessage("✓ 匹配成功! 职位 [" + jobTitle + "] 包含关键词 [" + keyword + "]");
+                return true;
+            }
+        }
+        
+        logMessage("✗ 匹配失败! 职位 [" + jobTitle + "] 不包含任何关键词");
+        logMessage("------------------------");
+        return false;
+    }
+
+    // 添加一个定时器来确保滑动功能正常工作
+    private void setupForcedScrollTimer() {
+        // 每5秒检查一次是否需要滑动
+        handler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (isRunning && !isServiceStopping) {
+                    // 获取当前时间
+                    long currentTime = System.currentTimeMillis();
+                    
+                    // 只在MAIN_LIST页面执行滚动
+                    if (currentPageType == PageType.MAIN_LIST) {
+                        // 计算自上次滑动以来的时间
+                        long timeSinceLastScroll = currentTime - lastAutoScrollTime;
+                        logMessage("强制滑动检查: 距上次滑动已过" + (timeSinceLastScroll / 1000) + "秒, 阈值" + (AUTO_SCROLL_INTERVAL / 1000) + "秒");
+                        
+                        // 如果超过滑动间隔，则执行滑动
+                        if (timeSinceLastScroll >= AUTO_SCROLL_INTERVAL) {
+                            logMessage("强制执行滑动操作 - 由定时器触发");
+                            performScrollDown();
+                        }
+                    }
+                    
+                    // 继续运行定时器
+                    handler.postDelayed(this, 2000); // 每2秒检查一次
+                }
+            }
+        }, 2000); // 2秒后开始第一次检查
+    }
 } // 类结束 
