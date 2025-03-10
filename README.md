@@ -7,6 +7,8 @@
 
 一个基于Android无障碍服务的BOSS直聘自动投递工具，通过AI驱动的界面识别和精确控制，实现招聘应用的全自动化操作。
 
+[![点击观看视频](https://img.youtube.com/vi/EqYfixZ9er4/0.jpg)](https://youtu.be/EqYfixZ9er4)
+
 ## 🌟 核心技术亮点
 
 - **高级无障碍服务实现**：利用AccessibilityService深度集成系统操作能力
