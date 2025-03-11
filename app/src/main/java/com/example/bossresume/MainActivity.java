@@ -35,6 +35,7 @@ public class MainActivity extends AppCompatActivity {
     public static final String PREF_NAME = "BossResumePrefs";
     public static final String KEY_KEYWORDS = "keywords";
     private static final String TAG = "MainActivity";
+
     private static final int REQUEST_CODE_ACCESSIBILITY = 1001;
     private static final int REQUEST_CODE_OVERLAY = 1002;
 
