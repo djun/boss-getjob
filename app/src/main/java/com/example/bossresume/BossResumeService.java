@@ -10,6 +10,7 @@ import android.graphics.Rect;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.Process;
 import android.util.Log;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
@@ -3303,6 +3304,9 @@ public class BossResumeService extends AccessibilityService {
     @Override
     public void onCreate() {
         super.onCreate();
+        // 启动悬浮按钮服务
+        startFloatingButtonService();
+        
         // 初始化界面检测定时器
         pageCheckRunnable = new Runnable() {
             @Override
@@ -3316,6 +3320,15 @@ public class BossResumeService extends AccessibilityService {
         };
         // 立即开始界面检测
         checkHandler.post(pageCheckRunnable);
+    }
+    
+    /**
+     * 启动悬浮按钮服务
+     */
+    private void startFloatingButtonService() {
+        Intent intent = new Intent(this, FloatingButtonService.class);
+        startService(intent);
+        Log.d(TAG, "已启动悬浮停止按钮服务");
     }
 
     // 修改检查当前页面的方法
@@ -3873,5 +3886,33 @@ public class BossResumeService extends AccessibilityService {
                 }
             }
         }, 2000); // 2秒后开始第一次检查
+    }
+
+    private void handleStopAction() {
+        logMessage("服务已停止运行");
+        isServiceStopping = true;
+        isRunning = false;
+        
+        // 先停止悬浮窗服务
+        try {
+            stopService(new Intent(this, FloatingButtonService.class));
+        } catch (Exception e) {
+            Log.e(TAG, "停止悬浮窗服务失败: " + e.getMessage());
+        }
+        
+        // 停止定时器
+        if (checkHandler != null) {
+            checkHandler.removeCallbacksAndMessages(null);
+        }
+        
+        // 确保完全停止服务
+        stopForeground(true);
+        stopSelf();
+        
+        // 延迟后强制结束进程，确保不会重启
+        new Handler().postDelayed(() -> {
+            Process.killProcess(Process.myPid());
+            System.exit(0);
+        }, 500);
     }
 } // 类结束 

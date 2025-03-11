@@ -6,6 +6,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.provider.Settings;
@@ -33,11 +35,12 @@ public class MainActivity extends AppCompatActivity {
     public static final String PREF_NAME = "BossResumePrefs";
     public static final String KEY_KEYWORDS = "keywords";
     private static final String TAG = "MainActivity";
+    private static final int REQUEST_CODE_ACCESSIBILITY = 1001;
+    private static final int REQUEST_CODE_OVERLAY = 1002;
 
     private TextView tvStatus;
     private TextView tvLog;
     private Button btnStart;
-    private Button btnStop;
     private Button btnAccessibilitySettings;
     private EditText etKeywords;
     private SharedPreferences sharedPreferences;
@@ -61,12 +64,10 @@ public class MainActivity extends AppCompatActivity {
         
         // 初始化控件
         btnStart = findViewById(R.id.btn_start);
-        btnStop = findViewById(R.id.btn_stop);
         tvStatus = findViewById(R.id.tv_status);
         
         // 初始化按钮状态 - 默认开始按钮可点击，停止按钮不可点击
         btnStart.setEnabled(true);
-        btnStop.setEnabled(false);
         
         // 检查无障碍服务状态并更新UI
         if (isAccessibilityServiceEnabled()) {
@@ -112,19 +113,8 @@ public class MainActivity extends AppCompatActivity {
         });
 
         btnStart.setOnClickListener(v -> {
-            if (isAccessibilityServiceEnabled()) {
-                startService();
-                updateLog("开始自动投递任务");
-            } else {
-                Toast.makeText(this, "请先开启无障碍服务", Toast.LENGTH_SHORT).show();
-                Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
-                startActivity(intent);
-            }
-        });
-
-        btnStop.setOnClickListener(v -> {
-            stopService();
-            updateLog("停止自动投递任务");
+            // 首先请求悬浮窗权限
+            requestOverlayPermission();
         });
 
         registerBroadcastReceiver();
@@ -226,7 +216,16 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        unregisterReceiver(serviceStatusReceiver);
+        try {
+            // 注销广播接收器
+            if (serviceStatusReceiver != null) {
+                unregisterReceiver(serviceStatusReceiver);
+                serviceStatusReceiver = null;
+            }
+        } catch (Exception e) {
+            // 忽略接收器未注册的异常
+            Log.e("MainActivity", "Error unregistering receiver: " + e.getMessage());
+        }
     }
 
     private void startService() {
@@ -371,16 +370,55 @@ public class MainActivity extends AppCompatActivity {
 
     private void updateServiceStatus(boolean isRunning) {
         Button startButton = findViewById(R.id.btn_start);
-        Button stopButton = findViewById(R.id.btn_stop);
         
         if (isRunning) {
             startButton.setEnabled(false);
-            stopButton.setEnabled(true);
             isServiceRunning = true;
         } else {
             startButton.setEnabled(true);
-            stopButton.setEnabled(false);
             isServiceRunning = false;
+        }
+    }
+
+    /**
+     * 请求悬浮窗权限
+     */
+    private void requestOverlayPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+            Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:" + getPackageName()));
+            startActivityForResult(intent, REQUEST_CODE_OVERLAY);
+            Toast.makeText(this, "请授予悬浮窗权限", Toast.LENGTH_LONG).show();
+        } else {
+            checkAccessibilityServiceEnabled();
+        }
+    }
+
+    /**
+     * 检查无障碍服务是否启用，并相应处理
+     */
+    private void checkAccessibilityServiceEnabled() {
+        if (isAccessibilityServiceEnabled()) {
+            startService();
+            updateLog("开始自动投递任务");
+        } else {
+            Toast.makeText(this, "请先开启无障碍服务", Toast.LENGTH_SHORT).show();
+            Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
+            startActivity(intent);
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        
+        if (requestCode == REQUEST_CODE_OVERLAY) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(this)) {
+                // 悬浮窗权限获取成功，继续检查无障碍服务
+                checkAccessibilityServiceEnabled();
+            } else {
+                Toast.makeText(this, "需要悬浮窗权限才能显示停止按钮", Toast.LENGTH_LONG).show();
+            }
         }
     }
 } 
