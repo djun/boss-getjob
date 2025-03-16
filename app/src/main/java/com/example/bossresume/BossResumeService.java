@@ -35,7 +35,7 @@ public class BossResumeService extends AccessibilityService {
     
     private boolean isRunning = false;
     private int totalCount = 0;
-    private int maxCount = 150;
+    private int maxCount = 350;
     private Handler handler = new Handler(Looper.getMainLooper());
     
     // 添加打招呼计数器
@@ -77,6 +77,7 @@ public class BossResumeService extends AccessibilityService {
     private static final int DETAIL_PAGE_LOAD_DELAY = 8000; // 职位详情页面加载等待时间
     private static final int MAIN_PAGE_LOAD_DELAY = 1000;   // 主页面加载等待时间
     private static final int CHAT_PAGE_LOAD_DELAY = 8000;   // 聊天页面加载等待时间
+    private static final int CHAT_PAGE_TIMEOUT = 3000;      // 聊天页面停留超时时间（3秒）
     private static final int BACK_OPERATION_DELAY = 1000;   // 返回操作之间的等待时间
     private static final int PAGE_TRANSITION_DELAY = 5000;  // 页面切换后的等待时间
 
@@ -3301,6 +3302,9 @@ public class BossResumeService extends AccessibilityService {
     private long returnLockTime = 0;
     private static final long RETURN_LOCK_DURATION = 3000; // 返回锁定时间3秒
     
+    // 添加聊天页面相关变量
+    private long lastChatPageTime = 0; // 最后进入聊天页面的时间
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -3409,12 +3413,42 @@ public class BossResumeService extends AccessibilityService {
                     performBackOperation();
                 }
             }
+        } else if (currentPage == PageType.CHAT_PAGE) {
+            // 聊天页面超时检测，类似职位详情页
+            if (lastChatPageTime == 0) {
+                // 首次进入聊天页面，记录时间
+                lastChatPageTime = System.currentTimeMillis();
+                logMessage("进入聊天页面，开始计时");
+            } else {
+                // 检查是否超时
+                long currentTime = System.currentTimeMillis();
+                // 添加剩余时间提示
+                long remainingTime = CHAT_PAGE_TIMEOUT - (currentTime - lastChatPageTime);
+                if (remainingTime > 0) {
+                    logMessage("聊天页面停留时间还剩：" + (remainingTime / 1000) + "秒");
+                }
+                if (currentTime - lastChatPageTime > CHAT_PAGE_TIMEOUT) {
+                    logMessage("在聊天页面停留超过3秒，执行返回操作");
+                    lastChatPageTime = 0; // 重置计时器
+                    performBackOperation();
+                }
+            }
         } else {
             // 如果离开了职位详情页，重置计时器
             if (lastDetailPageTime != 0) {
                 logMessage("离开职位详情页，重置计时器");
                 lastDetailPageTime = 0;
             }
+            // 如果离开了聊天页，重置计时器
+            if (lastChatPageTime != 0) {
+                logMessage("离开聊天页，重置计时器");
+                lastChatPageTime = 0;
+            }
+        }
+        
+        // 检查是否发现了沟通按钮
+        if (currentPage == PageType.JOB_DETAIL) {
+            // ...现有代码不变...
         }
     }
 
